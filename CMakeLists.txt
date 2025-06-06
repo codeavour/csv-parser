@@ -122,3 +122,39 @@ if (CSV_DEVELOPER)
     #    )
     #endif()
 endif()
+
+add_library(csv_parser INTERFACE)
+target_include_directories(csv_parser INTERFACE
+        $<INSTALL_INTERFACE:include>
+)
+
+install(DIRECTORY include/ DESTINATION include/csv_parser)
+
+install(TARGETS csv_parser
+        EXPORT csv_parserTargets
+)
+
+include(CMakePackageConfigHelpers)
+
+# write_basic_package_version_file(
+#         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/csv_parserConfigVersion.cmake"
+#         VERSION ${PROJECT_VERSION}
+#         COMPATIBILITY SameMajorVersion
+# )
+
+configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/csv_parserConfig.cmake.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/csv_parserConfig.cmake"
+        INSTALL_DESTINATION lib/cmake/csv_parser
+)
+
+install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/csv_parserConfig.cmake"
+        #        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/csv_parserConfigVersion.cmake"
+        DESTINATION lib/cmake/csv_parser
+)
+
+install(EXPORT csv_parserTargets
+        NAMESPACE csv::
+        DESTINATION lib/cmake/csv_parser
+)
