@@ -137,7 +137,7 @@ endif()
 
 message("Using single include: ${CSV_SINGLE_INCLUDE}")
 
-install(DIRECTORY include/ DESTINATION include/csv_parser)
+install(DIRECTORY ${CSV_INCLUDES_DIR} DESTINATION include/csv_parser)
 
 install(TARGETS csv_parser
         EXPORT csv_parserTargets
