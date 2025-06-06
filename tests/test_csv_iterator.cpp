@@ -34,8 +34,8 @@ TEST_CASE("Test CSVRow Interator", "[test_csv_row_iter]") {
         }
 
         // Backwards
-        REQUIRE(row.rbegin()->get<int>() == 345);
-        REQUIRE((row.rend() - 1)->get<>() == "123");
+        REQUIRE(row.rbegin().base()->get<int>() == 345);
+        REQUIRE((row.rend() - 1).base()->get<>() == "123");
     }
 
     SECTION("Iterator Arithmetic") {

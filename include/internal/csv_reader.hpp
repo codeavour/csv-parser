@@ -73,7 +73,7 @@ namespace csv {
             using difference_type = std::ptrdiff_t;
             using pointer = CSVRow * ;
             using reference = CSVRow & ;
-            using iterator_category = std::input_iterator_tag;
+            using iterator_category = std::forward_iterator_tag;
             #endif
 
             iterator() = default;
