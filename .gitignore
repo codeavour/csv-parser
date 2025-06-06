@@ -10,6 +10,8 @@ build/
 Testing/
 
 # CMake #
+!*cmake.in
+*.cmake
 /cmake-build-debug
 /cmake-build-release
 /cmake-superbuild-debug
@@ -32,7 +34,6 @@ docs/html
 .vs/
 *.pdb
 *.i*
-!*cmake.in
 *.*log
 
 # Compiled Object files
