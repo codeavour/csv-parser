@@ -128,6 +128,15 @@ target_include_directories(csv_parser INTERFACE
         $<INSTALL_INTERFACE:include>
 )
 
+option(CSV_SINGLE_INCLUDE "Use single include" ON)
+if (CSV_SINGLE_INCLUDE)
+    set(CSV_INCLUDES_DIR "single_include/")
+else ()
+    set(CSV_INCLUDES_DIR "include/")
+endif()
+
+message("Using single include: ${CSV_SINGLE_INCLUDE}")
+
 install(DIRECTORY include/ DESTINATION include/csv_parser)
 
 install(TARGETS csv_parser
