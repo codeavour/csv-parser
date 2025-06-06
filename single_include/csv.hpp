@@ -1988,22 +1988,22 @@ inline namespace literals {
 inline namespace string_view_literals {
 
 
-constexpr std::string_view operator "" _sv( const char* str, size_t len ) noexcept  // (1)
+constexpr std::string_view operator ""_sv( const char* str, size_t len ) noexcept  // (1)
 {
     return std::string_view{ str, len };
 }
 
-constexpr std::u16string_view operator "" _sv( const char16_t* str, size_t len ) noexcept  // (2)
+constexpr std::u16string_view operator ""_sv( const char16_t* str, size_t len ) noexcept  // (2)
 {
     return std::u16string_view{ str, len };
 }
 
-constexpr std::u32string_view operator "" _sv( const char32_t* str, size_t len ) noexcept  // (3)
+constexpr std::u32string_view operator ""_sv( const char32_t* str, size_t len ) noexcept  // (3)
 {
     return std::u32string_view{ str, len };
 }
 
-constexpr std::wstring_view operator "" _sv( const wchar_t* str, size_t len ) noexcept  // (4)
+constexpr std::wstring_view operator ""_sv( const wchar_t* str, size_t len ) noexcept  // (4)
 {
     return std::wstring_view{ str, len };
 }
@@ -6283,7 +6283,7 @@ namespace csv {
             using difference_type = std::ptrdiff_t;
             using pointer = CSVRow * ;
             using reference = CSVRow & ;
-            using iterator_category = std::input_iterator_tag;
+            using iterator_category = std::forward_iterator_tag;
             #endif
 
             iterator() = default;
@@ -6940,6 +6940,175 @@ namespace csv {
     ///@}
 }
 
+#include <sstream>
+#include <vector>
+
+
+namespace csv {
+    /** Shorthand function for parsing an in-memory CSV string
+     *
+     *  @return A collection of CSVRow objects
+     *
+     *  @par Example
+     *  @snippet tests/test_read_csv.cpp Parse Example
+     */
+    CSV_INLINE CSVReader parse(csv::string_view in, CSVFormat format) {
+        std::stringstream stream(std::string(in.data(), in.length()));
+        return CSVReader(stream, format);
+    }
+
+    /** Parses a CSV string with no headers
+     *
+     *  @return A collection of CSVRow objects
+     */
+    CSV_INLINE CSVReader parse_no_header(csv::string_view in) {
+        CSVFormat format;
+        format.header_row(-1);
+
+        return parse(in, format);
+    }
+
+    /** Parse a RFC 4180 CSV string, returning a collection
+     *  of CSVRow objects
+     *
+     *  @par Example
+     *  @snippet tests/test_read_csv.cpp Escaped Comma
+     *
+     */
+    CSV_INLINE CSVReader operator ""_csv(const char* in, size_t n) {
+        return parse(csv::string_view(in, n));
+    }
+
+    /** A shorthand for csv::parse_no_header() */
+    CSV_INLINE CSVReader operator ""_csv_no_header(const char* in, size_t n) {
+        return parse_no_header(csv::string_view(in, n));
+    }
+
+    /**
+     *  Find the position of a column in a CSV file or CSV_NOT_FOUND otherwise
+     *
+     *  @param[in] filename  Path to CSV file
+     *  @param[in] col_name  Column whose position we should resolve
+     *  @param[in] format    Format of the CSV file
+     */
+    CSV_INLINE int get_col_pos(
+        csv::string_view filename,
+        csv::string_view col_name,
+        const CSVFormat& format) {
+        CSVReader reader(filename, format);
+        return reader.index_of(col_name);
+    }
+
+    /** Get basic information about a CSV file
+     *  @include programs/csv_info.cpp
+     */
+    CSV_INLINE CSVFileInfo get_file_info(const std::string& filename) {
+        CSVReader reader(filename);
+        CSVFormat format = reader.get_format();
+        for (auto it = reader.begin(); it != reader.end(); ++it);
+
+        CSVFileInfo info = {
+            filename,
+            reader.get_col_names(),
+            format.get_delim(),
+            reader.n_rows(),
+            reader.get_col_names().size()
+        };
+
+        return info;
+    }
+}
+/** @file
+ *  Defines an object used to store CSV format settings
+ */
+
+#include <algorithm>
+#include <set>
+
+
+namespace csv {
+    CSV_INLINE CSVFormat& CSVFormat::delimiter(char delim) {
+        this->possible_delimiters = { delim };
+        this->assert_no_char_overlap();
+        return *this;
+    }
+
+    CSV_INLINE CSVFormat& CSVFormat::delimiter(const std::vector<char> & delim) {
+        this->possible_delimiters = delim;
+        this->assert_no_char_overlap();
+        return *this;
+    }
+
+    CSV_INLINE CSVFormat& CSVFormat::quote(char quote) {
+        this->no_quote = false;
+        this->quote_char = quote;
+        this->assert_no_char_overlap();
+        return *this;
+    }
+
+    CSV_INLINE CSVFormat& CSVFormat::trim(const std::vector<char> & chars) {
+        this->trim_chars = chars;
+        this->assert_no_char_overlap();
+        return *this;
+    }
+
+    CSV_INLINE CSVFormat& CSVFormat::column_names(const std::vector<std::string>& names) {
+        this->col_names = names;
+        this->header = -1;
+        return *this;
+    }
+
+    CSV_INLINE CSVFormat& CSVFormat::header_row(int row) {
+        if (row < 0) this->variable_column_policy = VariableColumnPolicy::KEEP;
+
+        this->header = row;
+        this->col_names = {};
+        return *this;
+    }
+
+    CSV_INLINE void CSVFormat::assert_no_char_overlap()
+    {
+        auto delims = std::set<char>(
+            this->possible_delimiters.begin(), this->possible_delimiters.end()),
+            trims = std::set<char>(
+                this->trim_chars.begin(), this->trim_chars.end());
+
+        // Stores intersection of possible delimiters and trim characters
+        std::vector<char> intersection = {};
+
+        // Find which characters overlap, if any
+        std::set_intersection(
+            delims.begin(), delims.end(),
+            trims.begin(), trims.end(),
+            std::back_inserter(intersection));
+
+        // Make sure quote character is not contained in possible delimiters
+        // or whitespace characters
+        if (delims.find(this->quote_char) != delims.end() ||
+            trims.find(this->quote_char) != trims.end()) {
+            intersection.push_back(this->quote_char);
+        }
+
+        if (!intersection.empty()) {
+            std::string err_msg = "There should be no overlap between the quote character, "
+                "the set of possible delimiters "
+                "and the set of whitespace characters. Offending characters: ";
+
+            // Create a pretty error message with the list of overlapping
+            // characters
+            for (size_t i = 0; i < intersection.size(); i++) {
+                err_msg += "'";
+                err_msg += intersection[i];
+                err_msg += "'";
+
+                if (i + 1 < intersection.size())
+                    err_msg += ", ";
+            }
+
+            throw std::runtime_error(err_msg + '.');
+        }
+    }
+}
 
 namespace csv {
     namespace internals {
@@ -7236,96 +7405,344 @@ namespace csv {
     }
 }
 /** @file
- *  Defines an object used to store CSV format settings
+ *  Defines the data type used for storing information about a CSV row
  */
 
-#include <algorithm>
-#include <set>
+#include <cassert>
+#include <functional>
+
+namespace csv {
+    namespace internals {
+        CSV_INLINE RawCSVField& CSVFieldList::operator[](size_t n) const {
+            const size_t page_no = n / _single_buffer_capacity;
+            const size_t buffer_idx = (page_no < 1) ? n : n % _single_buffer_capacity;
+            return this->buffers[page_no][buffer_idx];
+        }
+
+        CSV_INLINE void CSVFieldList::allocate() {
+            buffers.push_back(std::unique_ptr<RawCSVField[]>(new RawCSVField[_single_buffer_capacity]));
+
+            _current_buffer_size = 0;
+            _back = buffers.back().get();
+        }
+    }
+
+    /** Return a CSVField object corrsponding to the nth value in the row.
+     *
+     *  @note This method performs bounds checking, and will throw an
+     *        `std::runtime_error` if n is invalid.
+     *
+     *  @complexity
+     *  Constant, by calling csv::CSVRow::get_csv::string_view()
+     *
+     */
+    CSV_INLINE CSVField CSVRow::operator[](size_t n) const {
+        return CSVField(this->get_field(n));
+    }
+
+    /** Retrieve a value by its associated column name. If the column
+     *  specified can't be round, a runtime error is thrown.
+     *
+     *  @complexity
+     *  Constant. This calls the other CSVRow::operator[]() after
+     *  converting column names into indices using a hash table.
+     *
+     *  @param[in] col_name The column to look for
+     */
+    CSV_INLINE CSVField CSVRow::operator[](const std::string& col_name) const {
+        auto & col_names = this->data->col_names;
+        auto col_pos = col_names->index_of(col_name);
+        if (col_pos > -1) {
+            return this->operator[](col_pos);
+        }
+
+        throw std::runtime_error("Can't find a column named " + col_name);
+    }
+
+    CSV_INLINE CSVRow::operator std::vector<std::string>() const {
+        std::vector<std::string> ret;
+        for (size_t i = 0; i < size(); i++)
+            ret.push_back(std::string(this->get_field(i)));
+
+        return ret;
+    }
+
+    CSV_INLINE csv::string_view CSVRow::get_field(size_t index) const
+    {
+        using internals::ParseFlags;
+
+        if (index >= this->size())
+            throw std::runtime_error("Index out of bounds.");
+
+        const size_t field_index = this->fields_start + index;
+        auto& field = this->data->fields[field_index];
+        auto field_str = csv::string_view(this->data->data).substr(this->data_start + field.start);
+
+        if (field.has_double_quote) {
+            auto& value = this->data->double_quote_fields[field_index];
+            if (value.empty()) {
+                bool prev_ch_quote = false;
+                for (size_t i = 0; i < field.length; i++) {
+                    if (this->data->parse_flags[field_str[i] + 128] == ParseFlags::QUOTE) {
+                        if (prev_ch_quote) {
+                            prev_ch_quote = false;
+                            continue;
+                        }
+                        else {
+                            prev_ch_quote = true;
+                        }
+                    }
+
+                    value += field_str[i];
+                }
+            }
+
+            return csv::string_view(value);
+        }
+
+        return field_str.substr(0, field.length);
+    }
+
+    CSV_INLINE bool CSVField::try_parse_hex(int& parsedValue) {
+        size_t start = 0, end = 0;
+
+        // Trim out whitespace chars
+        for (; start < this->sv.size() && this->sv[start] == ' '; start++);
+        for (end = start; end < this->sv.size() && this->sv[end] != ' '; end++);
+        
+        int value_ = 0;
+
+        size_t digits = (end - start);
+        size_t base16_exponent = digits - 1;
+
+        if (digits == 0) return false;
+
+        for (const auto& ch : this->sv.substr(start, digits)) {
+            int digit = 0;
+
+            switch (ch) {
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+                digit = static_cast<int>(ch - '0');
+                break;
+            case 'a':
+            case 'A':
+                digit = 10;
+                break;
+            case 'b':
+            case 'B':
+                digit = 11;
+                break;
+            case 'c':
+            case 'C':
+                digit = 12;
+                break;
+            case 'd':
+            case 'D':
+                digit = 13;
+                break;
+            case 'e':
+            case 'E':
+                digit = 14;
+                break;
+            case 'f':
+            case 'F':
+                digit = 15;
+                break;
+            default:
+                return false;
+            }
+
+            value_ += digit * (int)pow(16, (double)base16_exponent);
+            base16_exponent--;
+        }
+
+        parsedValue = value_;
+        return true;
+    }
+
+    CSV_INLINE bool CSVField::try_parse_decimal(long double& dVal, const char decimalSymbol) {
+        // If field has already been parsed to empty, no need to do it aagin:
+        if (this->_type == DataType::CSV_NULL)
+                    return false;
+
+        // Not yet parsed or possibly parsed with other decimalSymbol
+        if (this->_type == DataType::UNKNOWN || this->_type == DataType::CSV_STRING || this->_type == DataType::CSV_DOUBLE)
+            this->_type = internals::data_type(this->sv, &this->value, decimalSymbol); // parse again
+
+        // Integral types are not affected by decimalSymbol and need not be parsed again
+
+        // Either we already had an integral type before, or we we just got any numeric type now.
+        if (this->_type >= DataType::CSV_INT8 && this->_type <= DataType::CSV_DOUBLE) {
+            dVal = this->value;
+            return true;
+        }
+
+        // CSV_NULL or CSV_STRING, not numeric
+        return false;
+    }
+
+#ifdef _MSC_VER
+#pragma region CSVRow Iterator
+#endif
+    /** Return an iterator pointing to the first field. */
+    CSV_INLINE CSVRow::iterator CSVRow::begin() const {
+        return CSVRow::iterator(this, 0);
+    }
+
+    /** Return an iterator pointing to just after the end of the CSVRow.
+     *
+     *  @warning Attempting to dereference the end iterator results
+     *           in dereferencing a null pointer.
+     */
+    CSV_INLINE CSVRow::iterator CSVRow::end() const noexcept {
+        return CSVRow::iterator(this, (int)this->size());
+    }
+
+    CSV_INLINE CSVRow::reverse_iterator CSVRow::rbegin() const noexcept {
+        return std::reverse_iterator<CSVRow::iterator>(this->end());
+    }
+
+    CSV_INLINE CSVRow::reverse_iterator CSVRow::rend() const {
+        return std::reverse_iterator<CSVRow::iterator>(this->begin());
+    }
+
+    CSV_INLINE HEDLEY_NON_NULL(2)
+    CSVRow::iterator::iterator(const CSVRow* _reader, int _i)
+        : daddy(_reader), i(_i) {
+        if (_i < (int)this->daddy->size())
+            this->field = std::make_shared<CSVField>(
+                this->daddy->operator[](_i));
+        else
+            this->field = nullptr;
+    }
+
+    CSV_INLINE CSVRow::iterator::reference CSVRow::iterator::operator*() const {
+        return *(this->field.get());
+    }
+
+    CSV_INLINE CSVRow::iterator::pointer CSVRow::iterator::operator->() const {
+        return this->field;
+    }
+
+    CSV_INLINE CSVRow::iterator& CSVRow::iterator::operator++() {
+        // Pre-increment operator
+        this->i++;
+        if (this->i < (int)this->daddy->size())
+            this->field = std::make_shared<CSVField>(
+                this->daddy->operator[](i));
+        else // Reached the end of row
+            this->field = nullptr;
+        return *this;
+    }
+
+    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator++(int) {
+        // Post-increment operator
+        auto temp = *this;
+        this->operator++();
+        return temp;
+    }
+
+    CSV_INLINE CSVRow::iterator& CSVRow::iterator::operator--() {
+        // Pre-decrement operator
+        this->i--;
+        this->field = std::make_shared<CSVField>(
+            this->daddy->operator[](this->i));
+        return *this;
+    }
+
+    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator--(int) {
+        // Post-decrement operator
+        auto temp = *this;
+        this->operator--();
+        return temp;
+    }
+    
+    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator+(difference_type n) const {
+        // Allows for iterator arithmetic
+        return CSVRow::iterator(this->daddy, i + (int)n);
+    }
+
+    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator-(difference_type n) const {
+        // Allows for iterator arithmetic
+        return CSVRow::iterator::operator+(-n);
+    }
+#ifdef _MSC_VER
+#pragma endregion CSVRow Iterator
+#endif
+}
+
+/** @file
+ *  Defines an input iterator for csv::CSVReader
+ */
 
 
 namespace csv {
-    CSV_INLINE CSVFormat& CSVFormat::delimiter(char delim) {
-        this->possible_delimiters = { delim };
-        this->assert_no_char_overlap();
-        return *this;
-    }
+    /** Return an iterator to the first row in the reader */
+    CSV_INLINE CSVReader::iterator CSVReader::begin() {
+        if (this->records->empty()) {
+            this->read_csv_worker = std::thread(&CSVReader::read_csv, this, internals::ITERATION_CHUNK_SIZE);
+            this->read_csv_worker.join();
 
-    CSV_INLINE CSVFormat& CSVFormat::delimiter(const std::vector<char> & delim) {
-        this->possible_delimiters = delim;
-        this->assert_no_char_overlap();
-        return *this;
-    }
-
-    CSV_INLINE CSVFormat& CSVFormat::quote(char quote) {
-        this->no_quote = false;
-        this->quote_char = quote;
-        this->assert_no_char_overlap();
-        return *this;
-    }
-
-    CSV_INLINE CSVFormat& CSVFormat::trim(const std::vector<char> & chars) {
-        this->trim_chars = chars;
-        this->assert_no_char_overlap();
-        return *this;
-    }
-
-    CSV_INLINE CSVFormat& CSVFormat::column_names(const std::vector<std::string>& names) {
-        this->col_names = names;
-        this->header = -1;
-        return *this;
-    }
-
-    CSV_INLINE CSVFormat& CSVFormat::header_row(int row) {
-        if (row < 0) this->variable_column_policy = VariableColumnPolicy::KEEP;
-
-        this->header = row;
-        this->col_names = {};
-        return *this;
-    }
-
-    CSV_INLINE void CSVFormat::assert_no_char_overlap()
-    {
-        auto delims = std::set<char>(
-            this->possible_delimiters.begin(), this->possible_delimiters.end()),
-            trims = std::set<char>(
-                this->trim_chars.begin(), this->trim_chars.end());
-
-        // Stores intersection of possible delimiters and trim characters
-        std::vector<char> intersection = {};
-
-        // Find which characters overlap, if any
-        std::set_intersection(
-            delims.begin(), delims.end(),
-            trims.begin(), trims.end(),
-            std::back_inserter(intersection));
-
-        // Make sure quote character is not contained in possible delimiters
-        // or whitespace characters
-        if (delims.find(this->quote_char) != delims.end() ||
-            trims.find(this->quote_char) != trims.end()) {
-            intersection.push_back(this->quote_char);
+            // Still empty => return end iterator
+            if (this->records->empty()) return this->end();
         }
 
-        if (!intersection.empty()) {
-            std::string err_msg = "There should be no overlap between the quote character, "
-                "the set of possible delimiters "
-                "and the set of whitespace characters. Offending characters: ";
+        this->_n_rows++;
+        CSVReader::iterator ret(this, this->records->pop_front());
+        return ret;
+    }
 
-            // Create a pretty error message with the list of overlapping
-            // characters
-            for (size_t i = 0; i < intersection.size(); i++) {
-                err_msg += "'";
-                err_msg += intersection[i];
-                err_msg += "'";
+    /** A placeholder for the imaginary past the end row in a CSV.
+     *  Attempting to deference this will lead to bad things.
+     */
+    CSV_INLINE HEDLEY_CONST CSVReader::iterator CSVReader::end() const noexcept {
+        return CSVReader::iterator();
+    }
 
-                if (i + 1 < intersection.size())
-                    err_msg += ", ";
-            }
+    /////////////////////////
+    // CSVReader::iterator //
+    /////////////////////////
 
-            throw std::runtime_error(err_msg + '.');
+    CSV_INLINE CSVReader::iterator::iterator(CSVReader* _daddy, CSVRow&& _row) :
+        daddy(_daddy) {
+        row = std::move(_row);
+    }
+
+    /** Advance the iterator by one row. If this CSVReader has an
+     *  associated file, then the iterator will lazily pull more data from
+     *  that file until the end of file is reached.
+     *
+     *  @note This iterator does **not** block the thread responsible for parsing CSV.
+     *
+     */
+    CSV_INLINE CSVReader::iterator& CSVReader::iterator::operator++() {
+        if (!daddy->read_row(this->row)) {
+            this->daddy = nullptr; // this == end()
         }
+
+        return *this;
+    }
+
+    /** Post-increment iterator */
+    CSV_INLINE CSVReader::iterator CSVReader::iterator::operator++(int) {
+        auto temp = *this;
+        if (!daddy->read_row(this->row)) {
+            this->daddy = nullptr; // this == end()
+        }
+
+        return temp;
     }
 }
+
 /** @file
  *  @brief Defines functionality needed for basic CSV parsing
  */
@@ -7633,345 +8050,6 @@ namespace csv {
 
         return false;
     }
-}
-
-/** @file
- *  Defines an input iterator for csv::CSVReader
- */
-
-
-namespace csv {
-    /** Return an iterator to the first row in the reader */
-    CSV_INLINE CSVReader::iterator CSVReader::begin() {
-        if (this->records->empty()) {
-            this->read_csv_worker = std::thread(&CSVReader::read_csv, this, internals::ITERATION_CHUNK_SIZE);
-            this->read_csv_worker.join();
-
-            // Still empty => return end iterator
-            if (this->records->empty()) return this->end();
-        }
-
-        this->_n_rows++;
-        CSVReader::iterator ret(this, this->records->pop_front());
-        return ret;
-    }
-
-    /** A placeholder for the imaginary past the end row in a CSV.
-     *  Attempting to deference this will lead to bad things.
-     */
-    CSV_INLINE HEDLEY_CONST CSVReader::iterator CSVReader::end() const noexcept {
-        return CSVReader::iterator();
-    }
-
-    /////////////////////////
-    // CSVReader::iterator //
-    /////////////////////////
-
-    CSV_INLINE CSVReader::iterator::iterator(CSVReader* _daddy, CSVRow&& _row) :
-        daddy(_daddy) {
-        row = std::move(_row);
-    }
-
-    /** Advance the iterator by one row. If this CSVReader has an
-     *  associated file, then the iterator will lazily pull more data from
-     *  that file until the end of file is reached.
-     *
-     *  @note This iterator does **not** block the thread responsible for parsing CSV.
-     *
-     */
-    CSV_INLINE CSVReader::iterator& CSVReader::iterator::operator++() {
-        if (!daddy->read_row(this->row)) {
-            this->daddy = nullptr; // this == end()
-        }
-
-        return *this;
-    }
-
-    /** Post-increment iterator */
-    CSV_INLINE CSVReader::iterator CSVReader::iterator::operator++(int) {
-        auto temp = *this;
-        if (!daddy->read_row(this->row)) {
-            this->daddy = nullptr; // this == end()
-        }
-
-        return temp;
-    }
-}
-
-/** @file
- *  Defines the data type used for storing information about a CSV row
- */
-
-#include <cassert>
-#include <functional>
-
-namespace csv {
-    namespace internals {
-        CSV_INLINE RawCSVField& CSVFieldList::operator[](size_t n) const {
-            const size_t page_no = n / _single_buffer_capacity;
-            const size_t buffer_idx = (page_no < 1) ? n : n % _single_buffer_capacity;
-            return this->buffers[page_no][buffer_idx];
-        }
-
-        CSV_INLINE void CSVFieldList::allocate() {
-            buffers.push_back(std::unique_ptr<RawCSVField[]>(new RawCSVField[_single_buffer_capacity]));
-
-            _current_buffer_size = 0;
-            _back = buffers.back().get();
-        }
-    }
-
-    /** Return a CSVField object corrsponding to the nth value in the row.
-     *
-     *  @note This method performs bounds checking, and will throw an
-     *        `std::runtime_error` if n is invalid.
-     *
-     *  @complexity
-     *  Constant, by calling csv::CSVRow::get_csv::string_view()
-     *
-     */
-    CSV_INLINE CSVField CSVRow::operator[](size_t n) const {
-        return CSVField(this->get_field(n));
-    }
-
-    /** Retrieve a value by its associated column name. If the column
-     *  specified can't be round, a runtime error is thrown.
-     *
-     *  @complexity
-     *  Constant. This calls the other CSVRow::operator[]() after
-     *  converting column names into indices using a hash table.
-     *
-     *  @param[in] col_name The column to look for
-     */
-    CSV_INLINE CSVField CSVRow::operator[](const std::string& col_name) const {
-        auto & col_names = this->data->col_names;
-        auto col_pos = col_names->index_of(col_name);
-        if (col_pos > -1) {
-            return this->operator[](col_pos);
-        }
-
-        throw std::runtime_error("Can't find a column named " + col_name);
-    }
-
-    CSV_INLINE CSVRow::operator std::vector<std::string>() const {
-        std::vector<std::string> ret;
-        for (size_t i = 0; i < size(); i++)
-            ret.push_back(std::string(this->get_field(i)));
-
-        return ret;
-    }
-
-    CSV_INLINE csv::string_view CSVRow::get_field(size_t index) const
-    {
-        using internals::ParseFlags;
-
-        if (index >= this->size())
-            throw std::runtime_error("Index out of bounds.");
-
-        const size_t field_index = this->fields_start + index;
-        auto& field = this->data->fields[field_index];
-        auto field_str = csv::string_view(this->data->data).substr(this->data_start + field.start);
-
-        if (field.has_double_quote) {
-            auto& value = this->data->double_quote_fields[field_index];
-            if (value.empty()) {
-                bool prev_ch_quote = false;
-                for (size_t i = 0; i < field.length; i++) {
-                    if (this->data->parse_flags[field_str[i] + 128] == ParseFlags::QUOTE) {
-                        if (prev_ch_quote) {
-                            prev_ch_quote = false;
-                            continue;
-                        }
-                        else {
-                            prev_ch_quote = true;
-                        }
-                    }
-
-                    value += field_str[i];
-                }
-            }
-
-            return csv::string_view(value);
-        }
-
-        return field_str.substr(0, field.length);
-    }
-
-    CSV_INLINE bool CSVField::try_parse_hex(int& parsedValue) {
-        size_t start = 0, end = 0;
-
-        // Trim out whitespace chars
-        for (; start < this->sv.size() && this->sv[start] == ' '; start++);
-        for (end = start; end < this->sv.size() && this->sv[end] != ' '; end++);
-        
-        int value_ = 0;
-
-        size_t digits = (end - start);
-        size_t base16_exponent = digits - 1;
-
-        if (digits == 0) return false;
-
-        for (const auto& ch : this->sv.substr(start, digits)) {
-            int digit = 0;
-
-            switch (ch) {
-            case '0':
-            case '1':
-            case '2':
-            case '3':
-            case '4':
-            case '5':
-            case '6':
-            case '7':
-            case '8':
-            case '9':
-                digit = static_cast<int>(ch - '0');
-                break;
-            case 'a':
-            case 'A':
-                digit = 10;
-                break;
-            case 'b':
-            case 'B':
-                digit = 11;
-                break;
-            case 'c':
-            case 'C':
-                digit = 12;
-                break;
-            case 'd':
-            case 'D':
-                digit = 13;
-                break;
-            case 'e':
-            case 'E':
-                digit = 14;
-                break;
-            case 'f':
-            case 'F':
-                digit = 15;
-                break;
-            default:
-                return false;
-            }
-
-            value_ += digit * (int)pow(16, (double)base16_exponent);
-            base16_exponent--;
-        }
-
-        parsedValue = value_;
-        return true;
-    }
-
-    CSV_INLINE bool CSVField::try_parse_decimal(long double& dVal, const char decimalSymbol) {
-        // If field has already been parsed to empty, no need to do it aagin:
-        if (this->_type == DataType::CSV_NULL)
-                    return false;
-
-        // Not yet parsed or possibly parsed with other decimalSymbol
-        if (this->_type == DataType::UNKNOWN || this->_type == DataType::CSV_STRING || this->_type == DataType::CSV_DOUBLE)
-            this->_type = internals::data_type(this->sv, &this->value, decimalSymbol); // parse again
-
-        // Integral types are not affected by decimalSymbol and need not be parsed again
-
-        // Either we already had an integral type before, or we we just got any numeric type now.
-        if (this->_type >= DataType::CSV_INT8 && this->_type <= DataType::CSV_DOUBLE) {
-            dVal = this->value;
-            return true;
-        }
-
-        // CSV_NULL or CSV_STRING, not numeric
-        return false;
-    }
-
-#ifdef _MSC_VER
-#pragma region CSVRow Iterator
-#endif
-    /** Return an iterator pointing to the first field. */
-    CSV_INLINE CSVRow::iterator CSVRow::begin() const {
-        return CSVRow::iterator(this, 0);
-    }
-
-    /** Return an iterator pointing to just after the end of the CSVRow.
-     *
-     *  @warning Attempting to dereference the end iterator results
-     *           in dereferencing a null pointer.
-     */
-    CSV_INLINE CSVRow::iterator CSVRow::end() const noexcept {
-        return CSVRow::iterator(this, (int)this->size());
-    }
-
-    CSV_INLINE CSVRow::reverse_iterator CSVRow::rbegin() const noexcept {
-        return std::reverse_iterator<CSVRow::iterator>(this->end());
-    }
-
-    CSV_INLINE CSVRow::reverse_iterator CSVRow::rend() const {
-        return std::reverse_iterator<CSVRow::iterator>(this->begin());
-    }
-
-    CSV_INLINE HEDLEY_NON_NULL(2)
-    CSVRow::iterator::iterator(const CSVRow* _reader, int _i)
-        : daddy(_reader), i(_i) {
-        if (_i < (int)this->daddy->size())
-            this->field = std::make_shared<CSVField>(
-                this->daddy->operator[](_i));
-        else
-            this->field = nullptr;
-    }
-
-    CSV_INLINE CSVRow::iterator::reference CSVRow::iterator::operator*() const {
-        return *(this->field.get());
-    }
-
-    CSV_INLINE CSVRow::iterator::pointer CSVRow::iterator::operator->() const {
-        return this->field;
-    }
-
-    CSV_INLINE CSVRow::iterator& CSVRow::iterator::operator++() {
-        // Pre-increment operator
-        this->i++;
-        if (this->i < (int)this->daddy->size())
-            this->field = std::make_shared<CSVField>(
-                this->daddy->operator[](i));
-        else // Reached the end of row
-            this->field = nullptr;
-        return *this;
-    }
-
-    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator++(int) {
-        // Post-increment operator
-        auto temp = *this;
-        this->operator++();
-        return temp;
-    }
-
-    CSV_INLINE CSVRow::iterator& CSVRow::iterator::operator--() {
-        // Pre-decrement operator
-        this->i--;
-        this->field = std::make_shared<CSVField>(
-            this->daddy->operator[](this->i));
-        return *this;
-    }
-
-    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator--(int) {
-        // Post-decrement operator
-        auto temp = *this;
-        this->operator--();
-        return temp;
-    }
-    
-    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator+(difference_type n) const {
-        // Allows for iterator arithmetic
-        return CSVRow::iterator(this->daddy, i + (int)n);
-    }
-
-    CSV_INLINE CSVRow::iterator CSVRow::iterator::operator-(difference_type n) const {
-        // Allows for iterator arithmetic
-        return CSVRow::iterator::operator+(-n);
-    }
-#ifdef _MSC_VER
-#pragma endregion CSVRow Iterator
-#endif
 }
 
 /** @file
@@ -8321,8 +8399,8 @@ namespace csv {
                 counts.push_back({});
                 rolling_means.push_back(0);
                 rolling_vars.push_back(0);
-                mins.push_back(std::numeric_limits<long double>::quiet_NaN());
-                maxes.push_back(std::numeric_limits<long double>::quiet_NaN());
+                mins.push_back(NAN);
+                maxes.push_back(NAN);
                 n.push_back(0);
             }
         }
@@ -8500,84 +8578,6 @@ namespace csv {
         }
 
         return csv_dtypes;
-    }
-}
-#include <sstream>
-#include <vector>
-
-
-namespace csv {
-    /** Shorthand function for parsing an in-memory CSV string
-     *
-     *  @return A collection of CSVRow objects
-     *
-     *  @par Example
-     *  @snippet tests/test_read_csv.cpp Parse Example
-     */
-    CSV_INLINE CSVReader parse(csv::string_view in, CSVFormat format) {
-        std::stringstream stream(std::string(in.data(), in.length()));
-        return CSVReader(stream, format);
-    }
-
-    /** Parses a CSV string with no headers
-     *
-     *  @return A collection of CSVRow objects
-     */
-    CSV_INLINE CSVReader parse_no_header(csv::string_view in) {
-        CSVFormat format;
-        format.header_row(-1);
-
-        return parse(in, format);
-    }
-
-    /** Parse a RFC 4180 CSV string, returning a collection
-     *  of CSVRow objects
-     *
-     *  @par Example
-     *  @snippet tests/test_read_csv.cpp Escaped Comma
-     *
-     */
-    CSV_INLINE CSVReader operator ""_csv(const char* in, size_t n) {
-        return parse(csv::string_view(in, n));
-    }
-
-    /** A shorthand for csv::parse_no_header() */
-    CSV_INLINE CSVReader operator ""_csv_no_header(const char* in, size_t n) {
-        return parse_no_header(csv::string_view(in, n));
-    }
-
-    /**
-     *  Find the position of a column in a CSV file or CSV_NOT_FOUND otherwise
-     *
-     *  @param[in] filename  Path to CSV file
-     *  @param[in] col_name  Column whose position we should resolve
-     *  @param[in] format    Format of the CSV file
-     */
-    CSV_INLINE int get_col_pos(
-        csv::string_view filename,
-        csv::string_view col_name,
-        const CSVFormat& format) {
-        CSVReader reader(filename, format);
-        return reader.index_of(col_name);
-    }
-
-    /** Get basic information about a CSV file
-     *  @include programs/csv_info.cpp
-     */
-    CSV_INLINE CSVFileInfo get_file_info(const std::string& filename) {
-        CSVReader reader(filename);
-        CSVFormat format = reader.get_format();
-        for (auto it = reader.begin(); it != reader.end(); ++it);
-
-        CSVFileInfo info = {
-            filename,
-            reader.get_col_names(),
-            format.get_delim(),
-            reader.n_rows(),
-            reader.get_col_names().size()
-        };
-
-        return info;
     }
 }
 
